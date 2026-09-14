@@ -15,11 +15,9 @@ for root, dirs, files in os.walk(path):
             csv_file = os.path.join(root, file)
             break
 
-# Load only the first 30,000 rows to stay safely within Render's 512MB memory limit
-df = pd.read_csv(csv_file, nrows=30000) if csv_file else pd.DataFrame()
+df = pd.read_csv(csv_file, nrows=20000) if csv_file else pd.DataFrame()
 if not df.empty:
     df.columns = df.columns.str.strip()
-    # Convert all columns to string to prevent memory bloat and type mismatch
     df = df.astype(str)
 
 @app.route("/", methods=["GET"])
@@ -31,11 +29,22 @@ def get_medicines():
     if df.empty:
         return jsonify({"error": "Dataset not loaded"}), 500
         
-    search_query = request.args.get("q", "").lower()
+    search_query = request.args.get("q", "").strip().lower()
     
     if search_query:
-        mask = df.apply(lambda row: row.str.lower().str.contains(search_query, na=False).any(), axis=1)
-        filtered_df = df[mask].head(100)
+        # Find the best column to search (e.g., name, brand, title, drug)
+        target_col = None
+        for col in df.columns:
+            if any(k in col.lower() for k in ['name', 'brand', 'drug', 'title', 'product']):
+                target_col = col
+                break
+        
+        if target_col:
+            filtered_df = df[df[target_col].str.lower().str.contains(search_query, na=False)].head(100)
+        else:
+            # Fallback to general search if no name column is found
+            mask = df.apply(lambda row: row.str.lower().str.contains(search_query, na=False).any(), axis=1)
+            filtered_df = df[mask].head(100)
     else:
         filtered_df = df.head(50)
         
