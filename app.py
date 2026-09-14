@@ -5,11 +5,9 @@ import os
 
 app = Flask(__name__)
 
-# Download dataset via kagglehub (reads KAGGLE_API_TOKEN from environment variables automatically)
 print("Downloading dataset...")
 path = kagglehub.dataset_download("utsh0dey/global-medicine-directory-and-healthcare-dataset")
 
-# Locate the CSV file automatically
 csv_file = None
 for root, dirs, files in os.walk(path):
     for file in files:
@@ -17,9 +15,12 @@ for root, dirs, files in os.walk(path):
             csv_file = os.path.join(root, file)
             break
 
-df = pd.read_csv(csv_file) if csv_file else pd.DataFrame()
+# Load only the first 30,000 rows to stay safely within Render's 512MB memory limit
+df = pd.read_csv(csv_file, nrows=30000) if csv_file else pd.DataFrame()
 if not df.empty:
     df.columns = df.columns.str.strip()
+    # Convert all columns to string to prevent memory bloat and type mismatch
+    df = df.astype(str)
 
 @app.route("/", methods=["GET"])
 def home():
@@ -33,7 +34,7 @@ def get_medicines():
     search_query = request.args.get("q", "").lower()
     
     if search_query:
-        mask = df.apply(lambda row: row.astype(str).str.lower().str.contains(search_query).any(), axis=1)
+        mask = df.apply(lambda row: row.str.lower().str.contains(search_query, na=False).any(), axis=1)
         filtered_df = df[mask].head(100)
     else:
         filtered_df = df.head(50)
