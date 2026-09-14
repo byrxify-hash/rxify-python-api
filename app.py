@@ -1,47 +1,21 @@
-from flask import Flask, jsonify, request
-import pandas as pd
-import kagglehub
-import os
+import mlcroissant as mlc
+import itertools
 
-app = Flask(__name__)
+# Fetch the Croissant JSON-LD for the dataset
+url = 'https://www.kaggle.com/datasets/utsh0dey/global-medicine-directory-and-healthcare-dataset/croissant/download'
+croissant_dataset = mlc.Dataset(url)
 
-print("Downloading dataset...")
-path = kagglehub.dataset_download("utsh0dey/global-medicine-directory-and-healthcare-dataset")
+# Print available record sets to identify the correct identifier name
+record_sets = [rs.id for rs in croissant_dataset.metadata.record_sets]
+print("Available Record Sets:", record_sets)
 
-csv_file = None
-for root, dirs, files in os.walk(path):
-    for file in files:
-        if file.endswith('.csv'):
-            csv_file = os.path.join(root, file)
-            break
-
-df = pd.read_csv(csv_file, nrows=20000) if csv_file else pd.DataFrame()
-if not df.empty:
-    df.columns = df.columns.str.strip()
-    df = df.astype(str)
-
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "online", "total_records": len(df)})
-
-@app.route("/medicines", methods=["GET"])
-def get_medicines():
-    if df.empty:
-        return jsonify({"error": "Dataset not loaded"}), 500
-        
-    search_query = request.args.get("q", "").strip().lower()
+# Use the first available record set automatically (or specify it by name if known)
+if record_sets:
+    file_path = record_sets[0]
+    print(f"Using record set: {file_path}")
     
-    if search_query:
-        # Fast, vectorized search across all columns
-        mask = False
-        for col in df.columns:
-            mask = mask | df[col].str.contains(search_query, case=False, na=False)
-        filtered_df = df[mask].head(100)
-    else:
-        filtered_df = df.head(50)
-        
-    return jsonify(filtered_df.to_dict(orient="records"))
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    # Fetch the records
+    record_set = croissant_dataset.records(record_set=file_path)
+    print("First 5 records:", list(itertools.islice(record_set, 5)))
+else:
+    print("No record sets found in the dataset metadata.")
