@@ -5,7 +5,7 @@ import os
 
 app = Flask(__name__)
 
-# Download dataset via kagglehub
+# Download dataset via kagglehub (reads KAGGLE_API_TOKEN from environment variables automatically)
 print("Downloading dataset...")
 path = kagglehub.dataset_download("utsh0dey/global-medicine-directory-and-healthcare-dataset")
 
@@ -18,8 +18,8 @@ for root, dirs, files in os.walk(path):
             break
 
 df = pd.read_csv(csv_file) if csv_file else pd.DataFrame()
-# Clean up column names if needed
-df.columns = df.columns.str.strip()
+if not df.empty:
+    df.columns = df.columns.str.strip()
 
 @app.route("/", methods=["GET"])
 def home():
@@ -27,14 +27,16 @@ def home():
 
 @app.route("/medicines", methods=["GET"])
 def get_medicines():
+    if df.empty:
+        return jsonify({"error": "Dataset not loaded"}), 500
+        
     search_query = request.args.get("q", "").lower()
     
     if search_query:
-        # Search across all columns for the query string
         mask = df.apply(lambda row: row.astype(str).str.lower().str.contains(search_query).any(), axis=1)
-        filtered_df = df[mask].head(100) # Limit results to 100 for performance
+        filtered_df = df[mask].head(100)
     else:
-        filtered_df = df.head(50) # Default view
+        filtered_df = df.head(50)
         
     return jsonify(filtered_df.to_dict(orient="records"))
 
