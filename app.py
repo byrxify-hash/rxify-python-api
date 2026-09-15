@@ -12,14 +12,28 @@ croissant_dataset = mlc.Dataset(url)
 record_sets = [rs.id for rs in croissant_dataset.metadata.record_sets]
 record_set_id = record_sets[0] if record_sets else None
 
-# Preload first 50 records into memory for instant responses
+# Safe recursive decoder for all bytes fields
+def decode_field(val):
+    if isinstance(val, bytes):
+        return val.decode('utf-8', errors='ignore')
+    if isinstance(val, (list, tuple)):
+        return [decode_field(x) for x in val]
+    if isinstance(val, dict):
+        return {decode_field(k): decode_field(v) for k, v in val.items()}
+    return str(val) if val is not None else ""
+
 cached_records = []
 if record_set_id:
     try:
         raw_rec = croissant_dataset.records(record_set=record_set_id)
-        for record in itertools.islice(raw_rec, 50):
-            cleaned = {k.split('/')[-1]: v for k, v in record.items()}
-            cached_records.append(cleaned)
+        for record in itertools.islice(raw_rec, 100):
+            cleaned_item = {}
+            for k, v in record.items():
+                clean_key = decode_field(k).split('/')[-1]
+                clean_val = decode_field(v)
+                cleaned_item[clean_key] = clean_val
+            cached_records.append(cleaned_item)
+        print(f"Successfully cached {len(cached_records)} records!")
     except Exception as e:
         print(f"Error caching records: {e}")
 
