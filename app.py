@@ -4,12 +4,7 @@ import os
 
 app = Flask(__name__)
 
-print("Initializing Full Croissant dataset (Indian Medicine Data)...")
 url = 'https://www.kaggle.com/datasets/mohneesh7/indian-medicine-data/croissant/download'
-croissant_dataset = mlc.Dataset(url)
-
-record_sets = [rs.id for rs in croissant_dataset.metadata.record_sets]
-record_set_id = record_sets[0] if record_sets else None
 
 # Safe recursive decoder
 def decode_field(val):
@@ -21,42 +16,72 @@ def decode_field(val):
         return {decode_field(k): decode_field(v) for k, v in val.items()}
     return str(val) if val is not None else ""
 
-# Fetch ALL records into memory
+# Publish records only after the entire dataset has loaded successfully.
 cached_records = []
-if record_set_id:
+dataset_status = "loading"
+
+
+def initialize_dataset():
+    global cached_records, dataset_status
+    cached_records = []
+    dataset_status = "loading"
     try:
-        print("Downloading full dataset... this may take a moment.")
-        raw_rec = croissant_dataset.records(record_set=record_set_id)
-        
-        # Looping through the ENTIRE dataset (no limits)
-        for record in raw_rec:
+        croissant_dataset = mlc.Dataset(url)
+        record_sets = [rs.id for rs in croissant_dataset.metadata.record_sets]
+        if not record_sets:
+            raise ValueError("Dataset has no record sets")
+
+        records = []
+        for record in croissant_dataset.records(record_set=record_sets[0]):
             cleaned_item = {}
             for k, v in record.items():
                 clean_key = decode_field(k).split('/')[-1]
-                clean_val = decode_field(v)
-                cleaned_item[clean_key] = clean_val
-            cached_records.append(cleaned_item)
-            
-        print(f"SUCCESS: Fully cached {len(cached_records)} records!")
-    except Exception as e:
-        print(f"Error caching records: {e}")
+                cleaned_item[clean_key] = decode_field(v)
+            records.append(cleaned_item)
+
+        cached_records = records
+        dataset_status = "ready"
+        app.logger.info("Fully cached %s records", len(cached_records))
+    except Exception:
+        dataset_status = "failed"
+        app.logger.exception("Dataset initialization failed")
+
+
+def dataset_unavailable():
+    return jsonify({
+        "status": "unavailable",
+        "dataset_status": dataset_status,
+        "error": {
+            "code": "dataset_unavailable",
+            "message": "Medicine data is unavailable. Please try again later."
+        }
+    }), 503
+
+
+initialize_dataset()
+
 
 @app.route("/", methods=["GET"])
 def home():
+    if dataset_status != "ready":
+        return dataset_unavailable()
     return jsonify({
-        "status": "online", 
-        "total_cached": len(cached_records), 
+        "status": "online",
+        "dataset_status": dataset_status,
+        "total_cached": len(cached_records),
         "dataset": "Indian Medicine Data - Full Fetch"
     })
 
 @app.route("/medicines", methods=["GET"])
 def get_medicines():
+    if dataset_status != "ready":
+        return dataset_unavailable()
     search_query = request.args.get("q", "").strip().lower()
-    
+
     # If no search, return only the first 50 to prevent browser freezing
     if not search_query:
         return jsonify(cached_records[:50])
-        
+
     filtered = []
     for r in cached_records:
         # SMART SEARCH: 1 or 2 letters strictly match the beginning of the name
@@ -70,7 +95,7 @@ def get_medicines():
             ]
             if any(name.startswith(search_query) for name in name_fields if name):
                 filtered.append(r)
-        
+
         # DEEP SEARCH: 3+ letters search anywhere inside all columns
         else:
             if any(search_query in str(v).lower() for v in r.values()):
